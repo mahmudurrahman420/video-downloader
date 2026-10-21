@@ -1,22 +1,42 @@
 {
-  "name": "videodownloader",
+  "name": "video-downloader",
   "version": "1.0.0",
   "main": "index.ts",
   "dependencies": {
+    "@expo/vector-icons": "^15.0.2",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-navigation/bottom-tabs": "^7.21.0",
+    "@react-navigation/native": "^7.5.1",
     "expo": "~58.0.16",
+    "expo-clipboard": "~58.0.3",
+    "expo-constants": "~58.0.12",
+    "expo-file-system": "~58.0.10",
+    "expo-image": "~58.0.16",
+    "expo-intent-launcher": "~58.0.3",
+    "expo-linking": "~58.0.13",
+    "expo-media-library": "~58.0.11",
+    "expo-network": "~58.0.3",
     "expo-status-bar": "~58.0.3",
+    "expo-system-ui": "~58.0.6",
+    "expo-web-browser": "~58.0.6",
     "react": "19.3.0",
-    "react-native": "0.88.0"
+    "react-native": "0.88.0",
+    "react-native-safe-area-context": "~5.10.1",
+    "react-native-screens": "~4.30.0"
   },
   "devDependencies": {
     "@types/react": "~19.3.0",
+    "tsx": "^4.23.15",
     "typescript": "~6.0.3"
   },
   "scripts": {
     "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
+    "android": "expo run:android",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "doctor": "expo-doctor",
+    "build:apk": "eas build --platform android --profile preview",
+    "build:apk:local": "expo prebuild --platform android --clean && cd android && ./gradlew assembleRelease"
   },
   "private": true
 }

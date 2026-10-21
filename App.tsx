@@ -1,20 +1,38 @@
+import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
-import { StyleSheet, Text, View } from 'react-native';
+import * as SystemUI from 'expo-system-ui';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SettingsProvider } from './src/store/SettingsContext';
+import { HistoryProvider } from './src/store/HistoryContext';
+import { DownloadsProvider } from './src/store/DownloadsContext';
+import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
+import { RootTabs } from './src/navigation/RootTabs';
 
-export default function App() {
+function ThemedApp() {
+  const { colors, isDark } = useTheme();
+  useEffect(() => {
+    SystemUI.setBackgroundColorAsync(colors.background).catch(() => {});
+  }, [colors.background]);
   return (
-    <View style={styles.container}>
-      <Text>Open up App.tsx to start working on your app!</Text>
-      <StatusBar style="auto" />
-    </View>
+    <>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <RootTabs />
+    </>
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#fff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
+export default function App() {
+  return (
+    <SafeAreaProvider>
+      <SettingsProvider>
+        <ThemeProvider>
+          <HistoryProvider>
+            <DownloadsProvider>
+              <ThemedApp />
+            </DownloadsProvider>
+          </HistoryProvider>
+        </ThemeProvider>
+      </SettingsProvider>
+    </SafeAreaProvider>
+  );
+}
