@@ -1,4 +1,5 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { FlatList, View } from 'react-native';
 import { EmptyState, IconButton, Screen, SegmentedControl } from '../components/ui';
 import { DownloadItemCard } from '../components/DownloadItemCard';
@@ -21,8 +22,15 @@ const EMPTY: Record<Filter, { title: string; message: string; icon: 'cloud-downl
 };
 
 export function DownloadsScreen() {
-  const { items, clearFinished } = useDownloads();
+  const { items, clearFinished, verifyFiles } = useDownloads();
   const [filter, setFilter] = useState<Filter>('pending');
+
+  // Re-check saved files whenever the tab is opened, so the list reflects what is really on the device.
+  useFocusEffect(
+    useCallback(() => {
+      verifyFiles();
+    }, [verifyFiles]),
+  );
 
   const counts = useMemo(
     () => ({

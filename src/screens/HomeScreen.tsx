@@ -12,7 +12,7 @@ import { radius, spacing, typography } from '../theme/colors';
 import { resolveLink, SUPPORTED_SOURCES } from '../services/providers';
 import { AppError } from '../services/http';
 import { ensureMediaPermission, permissionCanBeRequested } from '../services/downloads/mediaSaver';
-import type { DownloadOption, VideoMetadata } from '../types';
+import type { DownloadOption, OwnerExportGuide, VideoMetadata } from '../types';
 import { useDownloads } from '../store/DownloadsContext';
 import { useHistory } from '../store/HistoryContext';
 import { formatBytes } from '../utils/format';
@@ -51,7 +51,7 @@ export function HomeScreen() {
       }
       if (res.type === 'unsupported') {
         setState({ kind: 'unsupported', url: res.url, platformName: res.platformName, reason: res.reason });
-        history.add({ url: res.url, providerName: res.platformName, outcome: 'view-only', detail: res.reason });
+        history.add({ url: res.url, providerName: res.platformName, outcome: res.platformName ? 'view-only' : 'error', detail: res.reason });
         return;
       }
       setState({ kind: 'result', meta: res.data });
@@ -66,9 +66,12 @@ export function HomeScreen() {
     } catch (e) {
       if (seq !== requestSeq.current) return;
       const err = e instanceof AppError ? e : new AppError('unknown', 'Something went wrong while reading this link.');
-      const title =
-        err.kind === 'offline' ? 'No connection' : err.kind === 'timeout' ? 'Request timed out' : "Couldn't load video";
-      setState({ kind: 'error', title, message: err.message, retryable: err.kind !== 'http' || (err.status ?? 0) >= 500 });
+      setState({
+        kind: 'error',
+        title: errorTitle(err),
+        message: err.message,
+        retryable: err.kind === 'offline' || err.kind === 'timeout' || err.kind === 'unknown' || (err.status ?? 0) >= 500 || err.status === 429,
+      });
       history.add({ url: input.trim(), outcome: 'error', detail: err.message });
     }
   };
@@ -293,12 +296,76 @@ export function HomeScreen() {
                 onPress={() => openOfficial(state.meta.officialViewUrl!)}
               />
             )}
+
+            {state.meta.ownerExport && (
+              <OwnerExportCard guide={state.meta.ownerExport} onOpen={openOfficial} />
+            )}
           </>
         )}
 
         {state.kind === 'idle' && <SupportedSources />}
       </View>
     </Screen>
+  );
+}
+
+function errorTitle(err: AppError): string {
+  switch (err.kind) {
+    case 'offline':
+      return 'No connection';
+    case 'timeout':
+      return 'Request timed out';
+    case 'unsupported':
+      return 'Not a downloadable video';
+    case 'storage-permission':
+      return 'Permission needed';
+    case 'http':
+      if (err.status === 401 || err.status === 403) return 'File is not accessible';
+      if (err.status === 404 || err.status === 410) return 'File not found';
+      return 'Server error';
+    default:
+      return "Couldn't load video";
+  }
+}
+
+/** Collapsed help card: how an owner gets a downloadable copy via official tools. */
+function OwnerExportCard({ guide, onOpen }: { guide: OwnerExportGuide; onOpen: (url: string) => void }) {
+  const { colors } = useTheme();
+  const [open, setOpen] = useState(false);
+  return (
+    <Card style={{ gap: spacing.md }}>
+      <Pressable
+        onPress={() => setOpen((v) => !v)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.md }}
+      >
+        <Ionicons name="person-circle-outline" size={22} color={colors.primary} />
+        <View style={{ flex: 1 }}>
+          <Text style={[typography.heading, { color: colors.text }]}>Is this your video?</Text>
+          <Text style={[typography.small, { color: colors.textMuted }]}>
+            Get your own copy with {guide.platformName}'s official export tools
+          </Text>
+        </View>
+        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={colors.textFaint} />
+      </Pressable>
+      {open && (
+        <View style={{ gap: spacing.md }}>
+          {guide.steps.map((step, i) => (
+            <View key={i} style={{ flexDirection: 'row', gap: spacing.sm }}>
+              <View style={[styles.stepNum, { backgroundColor: colors.primarySoft }]}>
+                <Text style={[typography.caption, { color: colors.primary }]}>{i + 1}</Text>
+              </View>
+              <Text style={[typography.small, { color: colors.text, flex: 1 }]}>{step}</Text>
+            </View>
+          ))}
+          <Text style={[typography.small, { color: colors.textMuted }]}>{guide.afterExport}</Text>
+          {guide.links.map((l) => (
+            <AppButton key={l.url} label={l.label} icon="open-outline" variant="secondary" onPress={() => onOpen(l.url)} />
+          ))}
+        </View>
+      )}
+    </Card>
   );
 }
 
@@ -365,5 +432,6 @@ const styles = StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
   },
   sourceRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, padding: spacing.md, paddingHorizontal: spacing.lg },
+  stepNum: { width: 22, height: 22, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
   sourceIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
 });

@@ -24,6 +24,15 @@ export interface DownloadOption {
   acceptsRanges?: boolean;
 }
 
+/** Official way for the video's owner to get a downloadable copy. */
+export interface OwnerExportGuide {
+  platformName: string;
+  steps: string[];
+  links: { label: string; url: string }[];
+  /** What to do with the exported file in this app. */
+  afterExport: string;
+}
+
 export interface VideoMetadata {
   provider: ProviderId;
   providerName: string;
@@ -42,6 +51,8 @@ export interface VideoMetadata {
   officialViewUrl?: string;
   officialViewLabel?: string;
   options: DownloadOption[];
+  /** Official export workflow when the user owns the video. */
+  ownerExport?: OwnerExportGuide;
   /** Direct links need the user to confirm they have the rights to the file. */
   requiresRightsConfirmation?: boolean;
 }
@@ -59,6 +70,7 @@ export type ErrorKind =
   | 'offline'
   | 'timeout'
   | 'http'
+  | 'unsupported'
   | 'storage-permission'
   | 'storage-space'
   | 'interrupted'
@@ -89,6 +101,8 @@ export interface DownloadItem {
   assetId?: string;
   /** Human-readable path of the saved file (e.g. Movies/Video Downloader/x.mp4). */
   savedLocation?: string;
+  /** Completed file was deleted from the device outside the app. */
+  fileMissing?: boolean;
   createdAt: number;
   updatedAt: number;
   completedAt?: number;

@@ -1,4 +1,5 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import { base64ToBytes } from './mediaSniff';
 
 /** App-private working folder for in-progress downloads. */
 export const DOWNLOAD_DIR = `${FileSystem.documentDirectory}downloads/`;
@@ -37,6 +38,20 @@ export async function freeSpace(): Promise<number | undefined> {
     return await FileSystem.getFreeDiskStorageAsync();
   } catch {
     return undefined;
+  }
+}
+
+/** Read the first bytes of a file (for verifying it is really a video). */
+export async function readHeader(uri: string, length = 512): Promise<Uint8Array> {
+  try {
+    const b64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: FileSystem.EncodingType.Base64,
+      position: 0,
+      length,
+    });
+    return base64ToBytes(b64);
+  } catch {
+    return new Uint8Array();
   }
 }
 

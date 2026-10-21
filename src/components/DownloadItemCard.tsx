@@ -22,8 +22,11 @@ const STATUS: Record<DownloadItem['status'], { label: string; tone: Tone; icon: 
 
 export function DownloadItemCard({ item }: { item: DownloadItem }) {
   const { colors } = useTheme();
-  const { pause, resume, cancel, retry, remove } = useDownloads();
-  const s = STATUS[item.status];
+  const { pause, resume, cancel, retry, remove, redownload } = useDownloads();
+  const missing = item.status === 'completed' && item.fileMissing;
+  const s = missing
+    ? { label: 'Missing from device', tone: 'danger' as Tone, icon: 'alert-circle' as const }
+    : STATUS[item.status];
   const progress = item.totalBytes > 0 ? item.bytesWritten / item.totalBytes : 0;
   const showProgress = ['downloading', 'paused', 'queued', 'saving'].includes(item.status) || (item.status === 'failed' && item.bytesWritten > 0);
 
@@ -102,7 +105,7 @@ export function DownloadItemCard({ item }: { item: DownloadItem }) {
         </Text>
       )}
 
-      {item.status === 'completed' && item.savedLocation ? (
+      {item.status === 'completed' && item.savedLocation && !missing ? (
         <View style={[styles.location, { backgroundColor: colors.successSoft }]}>
           <Ionicons name="folder-open-outline" size={14} color={colors.success} />
           <Text style={[typography.small, { color: colors.text, flex: 1 }]} numberOfLines={2}>
@@ -136,8 +139,16 @@ export function DownloadItemCard({ item }: { item: DownloadItem }) {
         {(item.status === 'failed' || item.status === 'cancelled') && (
           <AppButton compact icon="refresh" label="Retry" onPress={() => retry(item.id)} />
         )}
-        {item.status === 'completed' && (
+        {item.status === 'completed' && !missing && (
           <AppButton compact icon="play-circle-outline" label="Play" onPress={onOpen} />
+        )}
+        {missing && (
+          <>
+            <Text style={[typography.small, { color: colors.danger, flexBasis: '100%' }]}>
+              This video was deleted from your device outside the app.
+            </Text>
+            <AppButton compact icon="refresh" label="Download again" onPress={() => redownload(item.id)} />
+          </>
         )}
       </View>
     </Card>

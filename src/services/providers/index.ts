@@ -39,7 +39,7 @@ export async function resolveLink(input: string): Promise<ResolveResult> {
 export const SUPPORTED_SOURCES = [
   { name: 'Internet Archive', detail: 'Public items · download', icon: 'library-outline' as const, download: true },
   { name: 'Wikimedia Commons', detail: 'Free-licensed · download', icon: 'globe-outline' as const, download: true },
-  { name: 'Direct video files', detail: '.mp4 .webm .mkv · download', icon: 'document-outline' as const, download: true },
+  { name: 'Direct video files', detail: '.mp4/.webm links, Dropbox · download', icon: 'document-outline' as const, download: true },
   { name: 'YouTube', detail: 'Preview · watch officially', icon: 'logo-youtube' as const, download: false },
   { name: 'Vimeo', detail: 'Preview · watch officially', icon: 'logo-vimeo' as const, download: false },
 ];

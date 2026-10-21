@@ -9,9 +9,11 @@ import {
   fileSize,
   FileSystem,
   freeSpace,
+  readHeader,
   tempUriFor,
 } from '../services/downloads/fileStore';
-import { deleteSavedVideo, saveToLibrary } from '../services/downloads/mediaSaver';
+import { assetExists, deleteSavedVideo, hasMediaPermission, saveToLibrary } from '../services/downloads/mediaSaver';
+import { runDownload, type EngineDeps } from '../services/downloads/engine';
 import { makeId } from '../utils/format';
 import { useSettings } from './SettingsContext';
 import { useHistory } from './HistoryContext';
@@ -26,11 +28,14 @@ interface DownloadsValue {
   retry: (id: string) => void;
   remove: (id: string, alsoDeleteFile?: boolean) => Promise<void>;
   clearFinished: () => void;
+  /** Re-check that completed downloads still exist on the device. */
+  verifyFiles: () => Promise<void>;
+  /** Download a completed-but-missing file again from the same source. */
+  redownload: (id: string) => void;
 }
 
 const DownloadsContext = createContext<DownloadsValue | null>(null);
 
-const SPACE_MARGIN = 50 * 1024 * 1024; // keep 50 MB free
 const ACTIVE: DownloadItem['status'][] = ['downloading', 'saving'];
 
 export function DownloadsProvider({ children }: { children: React.ReactNode }) {
@@ -165,7 +170,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     [patch, fail, history],
   );
 
-  // ---- the actual download --------------------------------------------------
+  // ---- the actual download (logic lives in services/downloads/engine.ts) ----
   const start = useCallback(
     async (id: string) => {
       if (starting.current.has(id) || tasks.current.has(id)) return;
@@ -174,112 +179,66 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         const it = get(id);
         if (!it) return;
 
-        if (!(await isOnline())) {
-          fail(id, 'offline', 'No internet connection. Connect and tap Retry.');
-          return;
-        }
-        if (settingsRef.current.wifiOnly && !(await isOnWifi())) {
-          fail(id, 'wifi-required', 'Wi-Fi only downloads are on. Connect to Wi-Fi or change this in Settings.');
-          return;
-        }
-
-        await ensureDownloadDir();
-        let written = await fileSize(it.tempUri);
-        let resumeData: string | undefined;
-        if (written > 0 && it.acceptsRanges && (!it.totalBytes || written < it.totalBytes)) {
-          resumeData = String(written);
-        } else if (written > 0) {
-          await deleteFile(it.tempUri);
-          written = 0;
-        }
-
-        const remaining = it.totalBytes ? it.totalBytes - written : 0;
-        const free = await freeSpace();
-        if (free !== undefined && remaining > 0 && free < remaining + SPACE_MARGIN) {
-          fail(id, 'storage-space', 'Not enough free storage on this device for this video.');
-          return;
-        }
-
-        let lastUpdate = 0;
-        const task = FileSystem.createDownloadResumable(
-          it.url,
-          it.tempUri,
-          {},
-          ({ totalBytesWritten, totalBytesExpectedToWrite }) => {
-            const now = Date.now();
-            if (now - lastUpdate < 250 && totalBytesWritten !== totalBytesExpectedToWrite) return;
-            lastUpdate = now;
-            patch(id, {
-              bytesWritten: totalBytesWritten,
-              totalBytes: totalBytesExpectedToWrite > 0 ? totalBytesExpectedToWrite : get(id)?.totalBytes ?? 0,
-            });
+        const deps: EngineDeps = {
+          isOnline,
+          isOnWifi,
+          ensureDir: ensureDownloadDir,
+          fileSize,
+          deleteFile,
+          freeSpace,
+          readHeader: (uri) => readHeader(uri),
+          createTask: (url, fileUri, onProgress, resumeData) => {
+            const task = FileSystem.createDownloadResumable(
+              url,
+              fileUri,
+              {},
+              ({ totalBytesWritten, totalBytesExpectedToWrite }) =>
+                onProgress(totalBytesWritten, totalBytesExpectedToWrite),
+              resumeData,
+            );
+            tasks.current.set(id, task);
+            return task;
           },
-          resumeData,
-        );
-        tasks.current.set(id, task);
-        patch(id, { status: 'downloading', bytesWritten: written, errorKind: undefined, errorMessage: undefined });
-        starting.current.delete(id);
+        };
 
-        let result: FileSystem.FileSystemDownloadResult | undefined;
-        try {
-          result = await task.downloadAsync();
-        } catch (e) {
-          tasks.current.delete(id);
-          const partial = await fileSize(it.tempUri);
-          const online = await isOnline();
-          fail(
-            id,
-            online ? 'interrupted' : 'offline',
-            online
-              ? `The download was interrupted${it.acceptsRanges ? ' — tap Retry to continue where it stopped' : ''}.`
-              : 'Connection lost during download. Reconnect and tap Retry.',
-          );
-          patch(id, { bytesWritten: partial });
-          return;
-        }
+        const outcome = await runDownload(
+          {
+            url: it.url,
+            tempUri: it.tempUri,
+            totalBytes: it.totalBytes,
+            acceptsRanges: it.acceptsRanges,
+            wifiOnly: settingsRef.current.wifiOnly,
+          },
+          deps,
+          {
+            onStarted: (_task, bytesWritten) => {
+              starting.current.delete(id);
+              patch(id, { status: 'downloading', bytesWritten, errorKind: undefined, errorMessage: undefined });
+            },
+            onProgress: (bytesWritten, totalBytes) => patch(id, { bytesWritten, totalBytes }),
+          },
+        );
         tasks.current.delete(id);
 
-        // Paused or cancelled by the user: native layer resolves with no result.
-        if (!result) {
-          const reason = stopReason.current.get(id);
-          stopReason.current.delete(id);
-          if (reason === 'cancel') return; // cancel() already updated state
-          patch(id, { status: 'paused', bytesWritten: await fileSize(it.tempUri) });
-          return;
+        switch (outcome.type) {
+          case 'stopped': {
+            const reason = stopReason.current.get(id);
+            stopReason.current.delete(id);
+            if (reason !== 'cancel') patch(id, { status: 'paused', bytesWritten: outcome.bytesWritten });
+            return;
+          }
+          case 'restart':
+            patch(id, { acceptsRanges: false, bytesWritten: 0, status: 'queued', errorMessage: undefined });
+            return;
+          case 'failed':
+            fail(id, outcome.error.kind, outcome.error.message);
+            patch(id, { bytesWritten: outcome.bytesWritten });
+            return;
+          case 'downloaded':
+            patch(id, { bytesWritten: outcome.size, totalBytes: outcome.size });
+            await saveCompleted(id);
+            return;
         }
-
-        // ---- verify the file is real before calling it a success ----
-        const status = result.status;
-        if (status < 200 || status >= 300) {
-          await deleteFile(it.tempUri);
-          fail(id, 'http', `The server refused the download (HTTP ${status}).`);
-          return;
-        }
-        if (resumeData && status === 200) {
-          // Server ignored our Range request and resent the whole file, which
-          // was appended to the partial data — discard and restart cleanly.
-          await deleteFile(it.tempUri);
-          patch(id, { acceptsRanges: false, bytesWritten: 0, status: 'queued' });
-          return;
-        }
-        const size = await fileSize(it.tempUri);
-        const expected = get(id)?.totalBytes ?? 0;
-        if (size <= 0) {
-          await deleteFile(it.tempUri);
-          fail(id, 'corrupt', 'The server sent an empty file. Nothing was saved.');
-          return;
-        }
-        if (expected > 0 && size !== expected) {
-          fail(
-            id,
-            'corrupt',
-            `Download incomplete (${size} of ${expected} bytes). Tap Retry to try again.`,
-          );
-          patch(id, { bytesWritten: size });
-          return;
-        }
-        patch(id, { bytesWritten: size, totalBytes: expected || size });
-        await saveCompleted(id);
       } catch (e) {
         tasks.current.delete(id);
         const err = e instanceof AppError ? e : new AppError('unknown', e instanceof Error ? e.message : String(e));
@@ -409,13 +368,39 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     [cancel, setAll],
   );
 
+  const verifyFiles = useCallback(async () => {
+    // Without media permission the check can't see the files; don't mark them missing falsely.
+    if (!(await hasMediaPermission())) return;
+    const completed = itemsRef.current.filter((i) => i.status === 'completed' && i.assetId);
+    for (const it of completed) {
+      const exists = await assetExists(it.assetId!);
+      if (exists === !it.fileMissing) continue;
+      patch(it.id, { fileMissing: !exists });
+    }
+  }, [patch]);
+
+  const redownload = useCallback(
+    (id: string) =>
+      patch(id, {
+        status: 'queued',
+        bytesWritten: 0,
+        assetId: undefined,
+        savedLocation: undefined,
+        fileMissing: undefined,
+        completedAt: undefined,
+        errorKind: undefined,
+        errorMessage: undefined,
+      }),
+    [patch],
+  );
+
   const clearFinished = useCallback(() => {
     setAll((prev) => prev.filter((i) => !['completed', 'cancelled'].includes(i.status)));
   }, [setAll]);
 
   const value = useMemo(
-    () => ({ items, loaded, enqueue, pause, resume, cancel, retry, remove, clearFinished }),
-    [items, loaded, enqueue, pause, resume, cancel, retry, remove, clearFinished],
+    () => ({ items, loaded, enqueue, pause, resume, cancel, retry, remove, clearFinished, verifyFiles, redownload }),
+    [items, loaded, enqueue, pause, resume, cancel, retry, remove, clearFinished, verifyFiles, redownload],
   );
 
   return <DownloadsContext.Provider value={value}>{children}</DownloadsContext.Provider>;

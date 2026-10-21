@@ -6,10 +6,10 @@ An Android app that looks up video links through official APIs and downloads **o
 |---|---|---|
 | Internet Archive (`archive.org/details/…`) | Preview + download public, non-restricted video files | archive.org Metadata API |
 | Wikimedia Commons (`commons.wikimedia.org/wiki/File:…`) | Preview + download freely licensed videos (original + official transcodes) | MediaWiki API |
-| Direct file links (`…/clip.mp4`, `.webm`, `.mkv`, `.mov`…) | Download after you confirm you have rights to the file | HTTP HEAD / range probe |
-| YouTube | Preview only, explains why, opens the official YouTube app | YouTube oEmbed |
+| Direct file links (`…/clip.mp4`, extension-less CDN links, Dropbox share links) | Server is checked first (must serve a real, public video file); download after you confirm you have rights to it. The downloaded bytes are verified as a video before it's marked Completed | HTTP HEAD / 1-byte range probe |
+| YouTube | Preview only, explains why, opens the official YouTube app; "Is this your video?" shows the YouTube Studio / Google Takeout export steps | YouTube oEmbed |
 | Vimeo | Preview only, opens Vimeo (owner-enabled downloads live there) | Vimeo oEmbed |
-| Facebook, Instagram, TikTok, X, platform CDN links | Refused with an explanation + "Open in app" | — |
+| Facebook, Instagram, TikTok, X, Google Drive, HLS/DASH playlists, platform CDN links | Refused with a specific explanation + "Open in app" | — |
 
 No DRM or platform protection is bypassed, and a download is only marked **Completed** after the file is verified on disk (non-empty, correct byte count, HTTP 2xx) and saved to shared storage.
 
@@ -38,7 +38,7 @@ src/
     persistence.ts              AsyncStorage
   store/                        SettingsContext, HistoryContext, DownloadsContext (queue + download engine)
   theme/                        colors, ThemeContext
-tests/detect.test.ts            unit tests for URL validation and formatting
+tests/                          URL validation, eligibility, download engine (progress + failures), media sniffing
 app.json / eas.json             app + APK build configuration
 ```
 

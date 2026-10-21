@@ -1,15 +1,14 @@
 import * as Network from 'expo-network';
-import type { ErrorKind } from '../types';
+import { AppError, httpMessage } from './errors';
+import {
+  headIsSufficient,
+  mergeProbes,
+  probeFromHead,
+  probeFromRangeGet,
+  type ProbeResult,
+} from './providers/directEligibility';
 
-export class AppError extends Error {
-  kind: ErrorKind;
-  status?: number;
-  constructor(kind: ErrorKind, message: string, status?: number) {
-    super(message);
-    this.kind = kind;
-    this.status = status;
-  }
-}
+export { AppError, httpMessage } from './errors';
 
 export async function isOnline(): Promise<boolean> {
   try {
@@ -64,62 +63,32 @@ export async function fetchJSON<T>(url: string, timeoutMs?: number): Promise<T> 
   }
 }
 
-export function httpMessage(status: number): string {
-  if (status === 401 || status === 403) return 'This video is private or access is restricted.';
-  if (status === 404) return 'The video could not be found. It may have been removed.';
-  if (status === 429) return 'Too many requests. Please wait a moment and try again.';
-  if (status >= 500) return 'The source server is having problems. Try again later.';
-  return `The server returned an error (HTTP ${status}).`;
-}
-
-export interface ProbeResult {
-  ok: boolean;
-  status: number;
-  contentType?: string;
-  contentLength?: number;
-  acceptsRanges: boolean;
-  finalUrl: string;
-}
+export type { ProbeResult } from './providers/directEligibility';
 
 /**
- * Learn a file's size/type/range support without downloading it.
- * Tries HEAD first, then a 1-byte ranged GET for servers that reject HEAD.
+ * Learn a file's size, type, filename and range support without downloading it.
+ * HEAD first; if HEAD is rejected or incomplete (no size / no range info), a
+ * 1-byte ranged GET fills the gaps.
  */
 export async function probeFile(url: string): Promise<ProbeResult> {
+  let head: ProbeResult | undefined;
   try {
-    const head = await fetchWithTimeout(url, { method: 'HEAD' }, 12000);
-    if (head.ok) {
-      const len = Number(head.headers.get('content-length'));
-      return {
-        ok: true,
-        status: head.status,
-        contentType: head.headers.get('content-type') ?? undefined,
-        contentLength: Number.isFinite(len) && len > 0 ? len : undefined,
-        acceptsRanges: (head.headers.get('accept-ranges') ?? '').toLowerCase().includes('bytes'),
-        finalUrl: head.url || url,
-      };
-    }
-    if (head.status !== 405 && head.status !== 501 && head.status !== 403) {
-      return { ok: false, status: head.status, acceptsRanges: false, finalUrl: url };
-    }
+    const res = await fetchWithTimeout(url, { method: 'HEAD' }, 12000);
+    head = probeFromHead(res.status, res.ok, (n) => res.headers.get(n), res.url || url);
+    if (headIsSufficient(head)) return head;
+    // Definitive answers from the server — no point retrying with GET.
+    if (!res.ok && [401, 404, 410].includes(res.status)) return head;
   } catch (e) {
     if (e instanceof AppError && e.kind === 'offline') throw e;
   }
 
-  const res = await fetchWithTimeout(url, { method: 'GET', headers: { Range: 'bytes=0-0' } }, 12000);
-  const range = res.headers.get('content-range'); // bytes 0-0/12345
-  const total = range ? Number(range.split('/')[1]) : Number(res.headers.get('content-length'));
-  // We only wanted the headers; stop the body.
   try {
-    // @ts-ignore - body may be undefined in React Native
-    res.body?.cancel?.();
-  } catch {}
-  return {
-    ok: res.ok,
-    status: res.status,
-    contentType: res.headers.get('content-type') ?? undefined,
-    contentLength: Number.isFinite(total) && total > 1 ? total : undefined,
-    acceptsRanges: res.status === 206,
-    finalUrl: res.url || url,
-  };
+    const res = await fetchWithTimeout(url, { method: 'GET', headers: { Range: 'bytes=0-0' } }, 15000);
+    const range = probeFromRangeGet(res.status, res.ok, (n) => res.headers.get(n), res.url || url);
+    return mergeProbes(head, range);
+  } catch (e) {
+    if (head?.ok) return head; // HEAD already told us enough to proceed.
+    if (head) return head; // report the HEAD status code
+    throw e;
+  }
 }

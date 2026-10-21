@@ -1,5 +1,6 @@
-import type { VideoMetadata } from '../../types';
+import type { OwnerExportGuide, VideoMetadata } from '../../types';
 import { AppError, fetchJSON } from '../http';
+import { sourcePermitsDownload } from './policy';
 
 interface VimeoOEmbed {
   title?: string;
@@ -8,6 +9,18 @@ interface VimeoOEmbed {
   duration?: number;
   description?: string;
 }
+
+export const VIMEO_OWNER_EXPORT: OwnerExportGuide = {
+  platformName: 'Vimeo',
+  steps: [
+    'Sign in to Vimeo with the account that uploaded the video.',
+    'Open the video from your Vimeo library and use its Download option to get the original or a transcoded file.',
+    'Alternatively, enable downloads for viewers in the video\'s privacy/download settings.',
+  ],
+  links: [{ label: 'Open your Vimeo videos', url: 'https://vimeo.com/manage/videos' }],
+  afterExport:
+    'Upload the exported file to storage you control (e.g. Dropbox) and paste its share link here to save it with this app.',
+};
 
 /**
  * Vimeo: metadata via Vimeo's official oEmbed API.
@@ -36,11 +49,12 @@ export async function resolveVimeo(sourceUrl: string, id: string): Promise<Video
     thumbnailUrl: data.thumbnail_url,
     durationSeconds: data.duration,
     description: data.description,
-    downloadAllowed: false,
+    downloadAllowed: sourcePermitsDownload('vimeo'), // always false: see policy.ts
     permissionNote:
       "Vimeo only allows downloads when the video's owner enables them, and the download button is provided on Vimeo itself. Open the video on Vimeo to watch it or use its official download button if the owner has turned it on.",
     officialViewUrl: pageUrl,
     officialViewLabel: 'Open on Vimeo',
+    ownerExport: VIMEO_OWNER_EXPORT,
     options: [],
   };
 }

@@ -6,7 +6,7 @@ import { formatBytes, formatDuration, sanitizeFileName } from '../src/utils/form
 
 const kindOf = (u: string) => {
   const d = detectSource(u);
-  return d.kind === 'supported' ? `${d.provider}:${d.id ?? ''}` : d.kind;
+  return d.kind === 'supported' ? `${d.provider}:${d.id ?? ''}${d.needsServerCheck ? ':check' : ''}` : d.kind;
 };
 
 test('rejects empty and malformed input', () => {
@@ -43,6 +43,32 @@ test('direct files allowed, platform stream CDNs refused', () => {
   assert.equal(kindOf('https://scontent.xx.fbcdn.net/v/clip.mp4'), 'unsupported');
   assert.equal(kindOf('https://www.instagram.com/reel/abc/'), 'unsupported');
   assert.equal(kindOf('https://example.com/page.html'), 'unsupported');
+  assert.equal(kindOf('https://example.com/song.mp3'), 'unsupported');
+  assert.equal(kindOf('https://example.com/live/master.m3u8'), 'unsupported');
+});
+
+test('links without a video extension are checked with the server, not rejected', () => {
+  assert.equal(kindOf('https://cdn.example.com/media/12345?download=1'), 'direct::check');
+  assert.equal(kindOf('https://files.example.org/get/abc'), 'direct::check');
+});
+
+test('Dropbox share links become official direct (dl=1) links', () => {
+  const d = detectSource('https://www.dropbox.com/scl/fi/abc123/clip.mp4?rlkey=xyz&dl=0');
+  assert.equal(d.kind, 'supported');
+  if (d.kind === 'supported') {
+    assert.equal(d.provider, 'direct');
+    assert.match(d.url.href, /[?&]dl=1(&|$)/);
+    assert.doesNotMatch(d.url.href, /dl=0/);
+  }
+  const d2 = detectSource('https://www.dropbox.com/s/abc/video.mp4');
+  assert.equal(d2.kind === 'supported' && d2.url.href.endsWith('?dl=1'), true);
+});
+
+test('Google Drive and platform pages are refused with a reason', () => {
+  const d = detectSource('https://drive.google.com/file/d/abc/view');
+  assert.equal(d.kind, 'unsupported');
+  assert.equal(d.kind === 'unsupported' && d.platformName, 'Google Drive');
+  assert.equal(kindOf('https://www.tiktok.com/@a/video/1'), 'unsupported');
 });
 
 test('url parser normalises hosts and queries', () => {

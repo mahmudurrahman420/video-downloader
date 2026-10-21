@@ -18,6 +18,14 @@ export async function ensureMediaPermission(): Promise<boolean> {
   return req.granted;
 }
 
+export async function hasMediaPermission(): Promise<boolean> {
+  try {
+    return (await MediaLibrary.getPermissionsAsync(true, ['video'])).granted;
+  } catch {
+    return false;
+  }
+}
+
 export async function permissionCanBeRequested(): Promise<boolean> {
   const current = await MediaLibrary.getPermissionsAsync(true, ['video']);
   return current.granted || current.canAskAgain;

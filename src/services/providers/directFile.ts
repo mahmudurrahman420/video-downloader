@@ -1,33 +1,24 @@
 import type { VideoMetadata } from '../../types';
-import { AppError, httpMessage, probeFile } from '../http';
+import { probeFile } from '../http';
 import type { ParsedUrl } from '../url/parseUrl';
-import { sanitizeFileName } from '../../utils/format';
+import { evaluateDirectProbe } from './directEligibility';
 
 /**
- * Direct video file links (e.g. https://example.com/clip.mp4) that a server
- * publishes openly. The user must confirm they have the rights to the file.
+ * Direct video file links (e.g. https://example.com/clip.mp4, a Dropbox dl=1
+ * link, or a CDN link without an extension). The server's own response
+ * decides eligibility: it must serve an actual video file, publicly.
+ * The user must also confirm they have the rights to the file.
  */
 export async function resolveDirectFile(u: ParsedUrl): Promise<VideoMetadata> {
   const probe = await probeFile(u.href);
-  if (!probe.ok) {
-    throw new AppError('http', httpMessage(probe.status), probe.status);
-  }
-  const type = (probe.contentType ?? '').split(';')[0].trim().toLowerCase();
-  const looksLikeVideo = type.startsWith('video/') || type === 'application/octet-stream' || type === 'application/ogg' || type === '';
-  if (!looksLikeVideo) {
-    throw new AppError(
-      'http',
-      `This link returns "${type}" instead of a video file. It may be a web page or require signing in.`,
-    );
-  }
-  const rawName = decodeURIComponent(u.pathname.split('/').pop() || 'video.mp4');
-  const fileName = sanitizeFileName(rawName);
-  const ext = fileName.split('.').pop()?.toUpperCase() ?? 'VIDEO';
+  const verdict = evaluateDirectProbe(probe, u.pathname);
+  if (!verdict.eligible) throw verdict.error;
+
   return {
     provider: 'direct',
     providerName: u.host,
     sourceUrl: u.href,
-    title: fileName.replace(/\.[^.]+$/, ''),
+    title: verdict.fileName.replace(/\.[^.]+$/, ''),
     downloadAllowed: true,
     requiresRightsConfirmation: true,
     permissionNote:
@@ -37,10 +28,10 @@ export async function resolveDirectFile(u: ParsedUrl): Promise<VideoMetadata> {
     options: [
       {
         id: 'file',
-        label: `${ext} file${type ? ` · ${type}` : ''}`,
+        label: verdict.label,
         url: probe.finalUrl,
-        fileName,
-        mimeType: type.startsWith('video/') ? type : undefined,
+        fileName: verdict.fileName,
+        mimeType: verdict.mimeType,
         sizeBytes: probe.contentLength,
         acceptsRanges: probe.acceptsRanges,
       },

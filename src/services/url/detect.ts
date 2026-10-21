@@ -35,7 +35,14 @@ const VIEW_ONLY_PLATFORMS: { domain: string; name: string }[] = [
 
 export type Detection =
   | { kind: 'invalid'; reason: string }
-  | { kind: 'supported'; provider: ProviderId; url: ParsedUrl; id?: string }
+  | {
+      kind: 'supported';
+      provider: ProviderId;
+      url: ParsedUrl;
+      id?: string;
+      /** Direct link without a recognisable video extension: the server's response decides. */
+      needsServerCheck?: boolean;
+    }
   | { kind: 'unsupported'; url: ParsedUrl; platformName?: string; reason: string };
 
 export function youtubeId(u: ParsedUrl): string | undefined {
@@ -50,6 +57,29 @@ export function youtubeId(u: ParsedUrl): string | undefined {
     return m ? m[1] : undefined;
   }
   return undefined;
+}
+
+/** File types that are clearly not videos — rejected without a network request. */
+const NON_VIDEO_EXTENSIONS = [
+  'html', 'htm', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'pdf', 'zip', 'rar', '7z',
+  'apk', 'exe', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'mp3', 'm4a', 'wav', 'flac', 'aac', 'json', 'xml',
+];
+
+/** Streaming manifests are not single files and cannot be saved as one download. */
+const STREAM_MANIFEST_EXTENSIONS = ['m3u8', 'mpd'];
+
+/**
+ * Dropbox share links (dl=0) open a preview page. Dropbox documents that
+ * setting dl=1 returns the file itself — the owner's official direct link.
+ */
+export function dropboxDirectUrl(u: ParsedUrl): string | undefined {
+  if (!hostMatches(u.host, 'dropbox.com')) return undefined;
+  if (!/^\/(s|scl\/fi|sh)\//.test(u.pathname)) return undefined;
+  const [base, frag] = u.href.split('#');
+  let next: string;
+  if (/[?&]dl=\d/.test(base)) next = base.replace(/([?&])dl=\d/, '$1dl=1');
+  else next = `${base}${base.includes('?') ? '&' : '?'}dl=1`;
+  return frag ? `${next}#${frag}` : next;
 }
 
 function fileExtension(pathname: string): string | undefined {
@@ -118,15 +148,38 @@ export function detectSource(input: string): Detection {
     };
   }
 
+  if (hostMatches(u.host, 'drive.google.com') || hostMatches(u.host, 'docs.google.com')) {
+    return {
+      kind: 'unsupported',
+      url: u,
+      platformName: 'Google Drive',
+      reason:
+        'Google Drive share links open a preview page, not the file. Open the file in Google Drive and use its Download button, or host the file somewhere that provides a direct link.',
+    };
+  }
+
+  const dropbox = dropboxDirectUrl(u);
+  if (dropbox) {
+    const du = parseUrl(dropbox);
+    if (du) return { kind: 'supported', provider: 'direct', url: du, needsServerCheck: true };
+  }
+
   const ext = fileExtension(u.pathname);
+  if (ext && STREAM_MANIFEST_EXTENSIONS.includes(ext)) {
+    return {
+      kind: 'unsupported',
+      url: u,
+      reason: 'This is a streaming playlist (HLS/DASH), not a single video file, so it cannot be saved as a download.',
+    };
+  }
+  if (ext && NON_VIDEO_EXTENSIONS.includes(ext)) {
+    return { kind: 'unsupported', url: u, reason: `This link points to a .${ext} file, not a video.` };
+  }
   if (ext && VIDEO_EXTENSIONS.includes(ext)) {
     return { kind: 'supported', provider: 'direct', url: u };
   }
 
-  return {
-    kind: 'unsupported',
-    url: u,
-    reason:
-      'This link is not from a supported source. Supported: Internet Archive and Wikimedia Commons pages, direct video file links (.mp4, .webm…), plus YouTube and Vimeo for viewing.',
-  };
+  // Any other http(s) link may still be a direct media file (CDN links, ?download=1,
+  // signed storage URLs). Ask the server what it actually serves before deciding.
+  return { kind: 'supported', provider: 'direct', url: u, needsServerCheck: true };
 }
