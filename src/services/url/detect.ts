@@ -20,17 +20,58 @@ const PLATFORM_STREAM_HOSTS = [
   'nflxvideo.net',
 ];
 
+export function isPlatformStreamHost(host: string): boolean {
+  const h = host.toLowerCase().replace(/^www\./, '');
+  return PLATFORM_STREAM_HOSTS.some((d) => hostMatches(h, d));
+}
+
 /** Platforms we recognise but cannot download from. */
-const VIEW_ONLY_PLATFORMS: { domain: string; name: string }[] = [
-  { domain: 'facebook.com', name: 'Facebook' },
-  { domain: 'fb.watch', name: 'Facebook' },
-  { domain: 'instagram.com', name: 'Instagram' },
-  { domain: 'tiktok.com', name: 'TikTok' },
-  { domain: 'twitter.com', name: 'X (Twitter)' },
-  { domain: 'x.com', name: 'X (Twitter)' },
-  { domain: 'dailymotion.com', name: 'Dailymotion' },
-  { domain: 'twitch.tv', name: 'Twitch' },
-  { domain: 'netflix.com', name: 'Netflix' },
+const VIEW_ONLY_PLATFORMS: { domain: string; name: string; reason: string }[] = [
+  {
+    domain: 'facebook.com',
+    name: 'Facebook',
+    reason:
+      "Facebook doesn't let third-party apps download videos from its pages; its video files are only reachable through Facebook's own player. To save your own Facebook videos, use Facebook's \"Download your information\" tool, or the Download option on videos you posted.",
+  },
+  {
+    domain: 'fb.watch',
+    name: 'Facebook',
+    reason:
+      "Facebook doesn't let third-party apps download videos; they are only reachable through Facebook's own player. Your own videos can be exported with Facebook's \"Download your information\" tool.",
+  },
+  {
+    domain: 'instagram.com',
+    name: 'Instagram',
+    reason:
+      "Instagram doesn't let third-party apps download posts or reels; video files are only served to Instagram's own player. Your own posts can be exported with Instagram's \"Download your information\" tool (Accounts Center).",
+  },
+  {
+    domain: 'tiktok.com',
+    name: 'TikTok',
+    reason:
+      "TikTok doesn't offer third-party apps a download API. Use the Save video option in the TikTok app — it appears when the creator has allowed downloads. Your own videos can be exported from TikTok's Download your data tool.",
+  },
+  {
+    domain: 'twitter.com',
+    name: 'X (Twitter)',
+    reason: "X doesn't let third-party apps download videos; they're only served to X's own player.",
+  },
+  {
+    domain: 'x.com',
+    name: 'X (Twitter)',
+    reason: "X doesn't let third-party apps download videos; they're only served to X's own player.",
+  },
+  {
+    domain: 'dailymotion.com',
+    name: 'Dailymotion',
+    reason: "Dailymotion doesn't offer third-party apps a download method. Watch it on Dailymotion.",
+  },
+  {
+    domain: 'twitch.tv',
+    name: 'Twitch',
+    reason: "Twitch doesn't offer third-party apps a download method. Streamers can download their own past broadcasts from the Twitch Creator Dashboard.",
+  },
+  { domain: 'netflix.com', name: 'Netflix', reason: 'Netflix content is DRM-protected and can only be saved inside the Netflix app.' },
 ];
 
 export type Detection =
@@ -61,12 +102,11 @@ export function youtubeId(u: ParsedUrl): string | undefined {
 
 /** File types that are clearly not videos — rejected without a network request. */
 const NON_VIDEO_EXTENSIONS = [
-  'html', 'htm', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'pdf', 'zip', 'rar', '7z',
+  'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'pdf', 'zip', 'rar', '7z',
   'apk', 'exe', 'doc', 'docx', 'xls', 'xlsx', 'txt', 'mp3', 'm4a', 'wav', 'flac', 'aac', 'json', 'xml',
 ];
 
-/** Streaming manifests are not single files and cannot be saved as one download. */
-const STREAM_MANIFEST_EXTENSIONS = ['m3u8', 'mpd'];
+
 
 /**
  * Dropbox share links (dl=0) open a preview page. Dropbox documents that
@@ -144,7 +184,7 @@ export function detectSource(input: string): Detection {
       kind: 'unsupported',
       url: u,
       platformName: platform.name,
-      reason: `${platform.name} does not offer an official download API for third-party apps. You can watch it in the official app or website.`,
+      reason: platform.reason,
     };
   }
 
@@ -165,11 +205,16 @@ export function detectSource(input: string): Detection {
   }
 
   const ext = fileExtension(u.pathname);
-  if (ext && STREAM_MANIFEST_EXTENSIONS.includes(ext)) {
+  if (ext === 'm3u8') {
+    // HLS stream: the HLS adapter checks it's complete and unencrypted before offering it.
+    return { kind: 'supported', provider: 'hls', url: u };
+  }
+  if (ext === 'mpd') {
     return {
       kind: 'unsupported',
       url: u,
-      reason: 'This is a streaming playlist (HLS/DASH), not a single video file, so it cannot be saved as a download.',
+      reason:
+        'This is a DASH stream (.mpd). DASH keeps video and audio in separate tracks that must be re-muxed into one file, which this app can’t do on the phone yet. If the site also offers an .m3u8 (HLS) or .mp4 link, use that instead.',
     };
   }
   if (ext && NON_VIDEO_EXTENSIONS.includes(ext)) {

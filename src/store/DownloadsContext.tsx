@@ -2,7 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState } from 'react-native';
 import type { DownloadItem, DownloadOption, ErrorKind, VideoMetadata } from '../types';
 import { loadJSON, saveJSON } from '../services/persistence';
-import { AppError, isOnline, isOnWifi } from '../services/http';
+import { AppError, fetchText, isOnline, isOnWifi } from '../services/http';
 import {
   deleteFile,
   ensureDownloadDir,
@@ -11,7 +11,11 @@ import {
   freeSpace,
   readHeader,
   tempUriFor,
+  appendFile,
+  listWorkingFiles,
+  segmentUriFor,
 } from '../services/downloads/fileStore';
+import { runHlsDownload } from '../services/downloads/hlsEngine';
 import { assetExists, deleteSavedVideo, hasMediaPermission, saveToLibrary } from '../services/downloads/mediaSaver';
 import { runDownload, type EngineDeps } from '../services/downloads/engine';
 import { makeId } from '../utils/format';
@@ -32,6 +36,10 @@ interface DownloadsValue {
   verifyFiles: () => Promise<void>;
   /** Download a completed-but-missing file again from the same source. */
   redownload: (id: string) => void;
+  /** Saved/partial storage usage. */
+  storageStats: () => Promise<{ savedCount: number; savedBytes: number; workingBytes: number; orphanBytes: number }>;
+  /** Delete leftover partial files that no download in the list can resume. */
+  cleanWorkingFiles: () => Promise<number>;
 }
 
 const DownloadsContext = createContext<DownloadsValue | null>(null);
@@ -175,6 +183,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
     async (id: string) => {
       if (starting.current.has(id) || tasks.current.has(id)) return;
       starting.current.add(id);
+      stopReason.current.delete(id); // clear any stale pause/cancel from a previous run
       try {
         const it = get(id);
         if (!it) return;
@@ -201,7 +210,48 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
           },
         };
 
-        const outcome = await runDownload(
+        const outcome =
+          it.kind === 'hls'
+            ? await runHlsDownload(
+                {
+                  playlistUrl: it.url,
+                  tempUri: it.tempUri,
+                  segmentTempUri: segmentUriFor(id),
+                  wifiOnly: settingsRef.current.wifiOnly,
+                  checkpoint: it.hls,
+                },
+                {
+                  isOnline,
+                  isOnWifi,
+                  ensureDir: ensureDownloadDir,
+                  fileSize,
+                  deleteFile,
+                  readHeader: (uri) => readHeader(uri),
+                  fetchText: (url) => fetchText(url, 10_000_000, 20000),
+                  appendFile,
+                  delay: (ms) => new Promise((r) => setTimeout(r, ms)),
+                  shouldStop: () => stopReason.current.has(id),
+                  createSegmentTask: (url, fileUri, headers) => {
+                    const task = FileSystem.createDownloadResumable(url, fileUri, { headers });
+                    tasks.current.set(id, task);
+                    return task;
+                  },
+                },
+                {
+                  onStarted: (bytesWritten) => {
+                    starting.current.delete(id);
+                    patch(id, { status: 'downloading', bytesWritten, errorKind: undefined, errorMessage: undefined });
+                  },
+                  onProgress: (cp) =>
+                    patch(id, {
+                      hls: cp,
+                      bytesWritten: cp.bytesCommitted,
+                      // Projected size from the average segment so far (shown as an estimate).
+                      totalBytes: Math.round((cp.bytesCommitted / cp.segmentsDone) * cp.segmentCount),
+                    }),
+                },
+              )
+            : await runDownload(
           {
             url: it.url,
             tempUri: it.tempUri,
@@ -228,14 +278,14 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
             return;
           }
           case 'restart':
-            patch(id, { acceptsRanges: false, bytesWritten: 0, status: 'queued', errorMessage: undefined });
+            patch(id, { acceptsRanges: false, bytesWritten: 0, status: 'queued', errorMessage: undefined, hls: undefined });
             return;
           case 'failed':
             fail(id, outcome.error.kind, outcome.error.message);
             patch(id, { bytesWritten: outcome.bytesWritten });
             return;
           case 'downloaded':
-            patch(id, { bytesWritten: outcome.size, totalBytes: outcome.size });
+            patch(id, { bytesWritten: outcome.size, totalBytes: outcome.size, hls: undefined });
             await saveCompleted(id);
             return;
         }
@@ -282,6 +332,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         // Archive.org and Wikimedia support ranges; direct links were probed.
         // Verified again on resume: falls back if the server ignores ranges.
         acceptsRanges: option.acceptsRanges ?? true,
+        kind: option.kind ?? 'file',
         status: 'queued',
         tempUri: tempUriFor(id, option.fileName),
         createdAt: Date.now(),
@@ -334,8 +385,11 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         tasks.current.delete(id);
       }
       const it = get(id);
-      if (it) await deleteFile(it.tempUri);
-      patch(id, { status: 'cancelled', bytesWritten: 0, errorKind: undefined, errorMessage: undefined });
+      if (it) {
+        await deleteFile(it.tempUri);
+        await deleteFile(segmentUriFor(id));
+      }
+      patch(id, { status: 'cancelled', bytesWritten: 0, hls: undefined, errorKind: undefined, errorMessage: undefined });
     },
     [patch],
   );
@@ -346,7 +400,7 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
       if (!it) return;
       // If the full file is already on disk, only the save step failed.
       const size = await fileSize(it.tempUri);
-      if (size > 0 && it.totalBytes > 0 && size === it.totalBytes) {
+      if (size > 0 && it.totalBytes > 0 && size === it.totalBytes && !it.hls) {
         await saveCompleted(id);
         return;
       }
@@ -388,19 +442,52 @@ export function DownloadsProvider({ children }: { children: React.ReactNode }) {
         savedLocation: undefined,
         fileMissing: undefined,
         completedAt: undefined,
+        hls: undefined,
         errorKind: undefined,
         errorMessage: undefined,
       }),
     [patch],
   );
 
+  const resumableIds = () =>
+    new Set(
+      itemsRef.current
+        .filter((i) => ['queued', 'downloading', 'paused', 'saving', 'failed'].includes(i.status))
+        .map((i) => i.id),
+    );
+  const ownerOf = (name: string) => name.replace(/\.[^.]+$/, '');
+
+  const storageStats = useCallback(async () => {
+    const saved = itemsRef.current.filter((i) => i.status === 'completed' && !i.fileMissing);
+    const files = await listWorkingFiles();
+    const keep = resumableIds();
+    return {
+      savedCount: saved.length,
+      savedBytes: saved.reduce((s, i) => s + (i.totalBytes || i.bytesWritten), 0),
+      workingBytes: files.reduce((s, f) => s + f.size, 0),
+      orphanBytes: files.filter((f) => !keep.has(ownerOf(f.name))).reduce((s, f) => s + f.size, 0),
+    };
+  }, []);
+
+  const cleanWorkingFiles = useCallback(async () => {
+    const keep = resumableIds();
+    const files = await listWorkingFiles();
+    let freed = 0;
+    for (const f of files) {
+      if (keep.has(ownerOf(f.name)) || tasks.current.has(ownerOf(f.name))) continue;
+      await deleteFile(f.uri);
+      freed += f.size;
+    }
+    return freed;
+  }, []);
+
   const clearFinished = useCallback(() => {
     setAll((prev) => prev.filter((i) => !['completed', 'cancelled'].includes(i.status)));
   }, [setAll]);
 
   const value = useMemo(
-    () => ({ items, loaded, enqueue, pause, resume, cancel, retry, remove, clearFinished, verifyFiles, redownload }),
-    [items, loaded, enqueue, pause, resume, cancel, retry, remove, clearFinished, verifyFiles, redownload],
+    () => ({ items, loaded, enqueue, pause, resume, cancel, retry, remove, clearFinished, verifyFiles, redownload, storageStats, cleanWorkingFiles }),
+    [items, loaded, enqueue, pause, resume, cancel, retry, remove, clearFinished, verifyFiles, redownload, storageStats, cleanWorkingFiles],
   );
 
   return <DownloadsContext.Provider value={value}>{children}</DownloadsContext.Provider>;

@@ -36,7 +36,8 @@
     "test": "tsx --test tests/*.test.ts",
     "doctor": "expo-doctor",
     "build:apk": "eas build --platform android --profile preview",
-    "build:apk:local": "expo prebuild --platform android --clean && cd android && ./gradlew assembleRelease"
+    "build:apk:local": "expo prebuild --platform android --clean && cd android && ./gradlew assembleRelease",
+    "test:live": "tsx --test --test-concurrency=1 tests/live/*.test.ts"
   },
   "private": true
 }

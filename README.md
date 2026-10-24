@@ -2,14 +2,15 @@
 
 An Android app that looks up video links through official APIs and downloads **only** when the source permits it.
 
-| Source | What the app does | Official API used |
+| Source | What the app does | How |
 |---|---|---|
-| Internet Archive (`archive.org/details/…`) | Preview + download public, non-restricted video files | archive.org Metadata API |
-| Wikimedia Commons (`commons.wikimedia.org/wiki/File:…`) | Preview + download freely licensed videos (original + official transcodes) | MediaWiki API |
-| Direct file links (`…/clip.mp4`, extension-less CDN links, Dropbox share links) | Server is checked first (must serve a real, public video file); download after you confirm you have rights to it. The downloaded bytes are verified as a video before it's marked Completed | HTTP HEAD / 1-byte range probe |
-| YouTube | Preview only, explains why, opens the official YouTube app; "Is this your video?" shows the YouTube Studio / Google Takeout export steps | YouTube oEmbed |
-| Vimeo | Preview only, opens Vimeo (owner-enabled downloads live there) | Vimeo oEmbed |
-| Facebook, Instagram, TikTok, X, Google Drive, HLS/DASH playlists, platform CDN links | Refused with a specific explanation + "Open in app" | — |
+| Direct video links (`.mp4`, `.webm`, `.mkv`, extension-less CDN links, Dropbox shares) | Download with progress, pause/resume (HTTP ranges), retry; redirects re-followed on every attempt | HEAD + 1-byte range probe, magic-byte check of the result |
+| HLS streams (`.m3u8`, or detected by content type) | Pick a resolution; segments downloaded and joined into one MPEG-TS/MP4 file; resumes per segment; transient segment errors retried | RFC 8216 playlist parsing. Live, AES-encrypted and DRM streams are refused with the reason |
+| Web pages that publish a video | Offers the files the page openly declares (Open Graph, JSON-LD VideoObject, HTML5 `<video>/<source>`), in each available quality; embedded YouTube/Vimeo players hand off to those adapters | Page markup only; platform CDN links skipped |
+| Internet Archive | All public video formats of an item | Metadata API |
+| Wikimedia Commons | Original + official transcodes, license shown | MediaWiki API |
+| YouTube, Vimeo | Real metadata + thumbnail, open in official app, owner export steps (YouTube Studio / Takeout, Vimeo) | oEmbed. These platforms serve video only to their own players |
+| Facebook, Instagram, TikTok, X, Twitch, Netflix | Specific explanation per platform + its own save/export option + open in app | No authorized third-party download method exists |
 
 No DRM or platform protection is bypassed, and a download is only marked **Completed** after the file is verified on disk (non-empty, correct byte count, HTTP 2xx) and saved to shared storage.
 
@@ -38,7 +39,8 @@ src/
     persistence.ts              AsyncStorage
   store/                        SettingsContext, HistoryContext, DownloadsContext (queue + download engine)
   theme/                        colors, ThemeContext
-tests/                          URL validation, eligibility, download engine (progress + failures), media sniffing
+tests/                          unit tests: every provider (mocked HTTP), URL validation, errors, file + HLS engines
+tests/live/                     live integration tests against the real services (run in CI before every build)
 app.json / eas.json             app + APK build configuration
 ```
 

@@ -27,7 +27,12 @@ export function DownloadItemCard({ item }: { item: DownloadItem }) {
   const s = missing
     ? { label: 'Missing from device', tone: 'danger' as Tone, icon: 'alert-circle' as const }
     : STATUS[item.status];
-  const progress = item.totalBytes > 0 ? item.bytesWritten / item.totalBytes : 0;
+  const isHls = item.kind === 'hls' && !!item.hls && item.status !== 'completed';
+  const progress = isHls
+    ? item.hls!.segmentsDone / Math.max(1, item.hls!.segmentCount)
+    : item.totalBytes > 0
+      ? item.bytesWritten / item.totalBytes
+      : 0;
   const showProgress = ['downloading', 'paused', 'queued', 'saving'].includes(item.status) || (item.status === 'failed' && item.bytesWritten > 0);
 
   const onOpen = async () => {
@@ -54,8 +59,9 @@ export function DownloadItemCard({ item }: { item: DownloadItem }) {
     }
   };
 
-  const sizeText =
-    item.status === 'completed'
+  const sizeText = isHls
+    ? `${formatBytes(item.bytesWritten)} of ~${formatBytes(item.totalBytes)} · segment ${item.hls!.segmentsDone}/${item.hls!.segmentCount}`
+    : item.status === 'completed'
       ? formatBytes(item.totalBytes || item.bytesWritten)
       : item.totalBytes > 0
         ? `${formatBytes(item.bytesWritten)} of ${formatBytes(item.totalBytes)}`
@@ -94,7 +100,7 @@ export function DownloadItemCard({ item }: { item: DownloadItem }) {
           <View style={styles.metaRow}>
             <Text style={[typography.small, { color: colors.textMuted }]}>{sizeText}</Text>
             <Text style={[typography.small, { color: colors.text, fontWeight: '600' }]}>
-              {item.status === 'saving' ? 'Finishing…' : formatPercent(item.bytesWritten, item.totalBytes)}
+              {item.status === 'saving' ? 'Finishing…' : isHls ? `${Math.floor(progress * 100)}%` : formatPercent(item.bytesWritten, item.totalBytes)}
             </Text>
           </View>
         </View>

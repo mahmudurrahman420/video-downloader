@@ -157,7 +157,9 @@ export function evaluateDirectProbe(probe: ProbeResult, urlPathname: string): Di
       eligible: false,
       error: new AppError(
         'unsupported',
-        'This is a streaming playlist (HLS/DASH), not a single video file, so it cannot be saved as a download.',
+        type === 'application/dash+xml' || ext === 'mpd'
+          ? 'This is a DASH stream (.mpd), which keeps video and audio in separate tracks; it can’t be joined into one file on the phone. Use an .m3u8 or .mp4 link if the site offers one.'
+          : 'This is a streaming playlist, not a single file — it is handled by the HLS downloader instead.',
       ),
     };
   }

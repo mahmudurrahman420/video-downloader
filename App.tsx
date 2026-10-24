@@ -7,6 +7,9 @@ import { HistoryProvider } from './src/store/HistoryContext';
 import { DownloadsProvider } from './src/store/DownloadsContext';
 import { ThemeProvider, useTheme } from './src/theme/ThemeContext';
 import { RootTabs } from './src/navigation/RootTabs';
+import { installExpoNetworkChecker } from './src/services/expoNetwork';
+
+installExpoNetworkChecker();
 
 function ThemedApp() {
   const { colors, isDark } = useTheme();

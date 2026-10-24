@@ -1,4 +1,4 @@
-import * as Network from 'expo-network';
+import { isOnline } from './networkStatus';
 import { AppError, httpMessage } from './errors';
 import {
   headIsSufficient,
@@ -10,23 +10,7 @@ import {
 
 export { AppError, httpMessage } from './errors';
 
-export async function isOnline(): Promise<boolean> {
-  try {
-    const state = await Network.getNetworkStateAsync();
-    return state.isConnected !== false && state.isInternetReachable !== false;
-  } catch {
-    return true; // Unknown — let the request itself decide.
-  }
-}
-
-export async function isOnWifi(): Promise<boolean> {
-  try {
-    const state = await Network.getNetworkStateAsync();
-    return state.type === Network.NetworkStateType.WIFI || state.type === Network.NetworkStateType.ETHERNET;
-  } catch {
-    return false;
-  }
-}
+export { isOnline, isOnWifi } from './networkStatus';
 
 /** fetch() with a timeout and errors mapped to user-friendly kinds. */
 export async function fetchWithTimeout(
@@ -91,4 +75,31 @@ export async function probeFile(url: string): Promise<ProbeResult> {
     if (head) return head; // report the HEAD status code
     throw e;
   }
+}
+
+export interface TextResponse {
+  status: number;
+  ok: boolean;
+  contentType: string;
+  finalUrl: string;
+  text: string;
+}
+
+/**
+ * GET a text resource (playlist, web page). Large bodies are truncated to
+ * `maxChars` so a mistaken link to a huge file can't exhaust memory.
+ */
+export async function fetchText(url: string, maxChars = 2_000_000, timeoutMs = 15000): Promise<TextResponse> {
+  const res = await fetchWithTimeout(
+    url,
+    { headers: { Accept: 'text/html,application/xhtml+xml,application/vnd.apple.mpegurl,*/*;q=0.8' } },
+    timeoutMs,
+  );
+  const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+  let text = '';
+  if (res.ok && !contentType.startsWith('video/') && !contentType.startsWith('audio/') && !contentType.startsWith('image/')) {
+    text = await res.text();
+    if (text.length > maxChars) text = text.slice(0, maxChars);
+  }
+  return { status: res.status, ok: res.ok, contentType, finalUrl: res.url || url, text };
 }

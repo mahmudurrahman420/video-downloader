@@ -55,4 +55,45 @@ export async function readHeader(uri: string, length = 512): Promise<Uint8Array>
   }
 }
 
+const APPEND_CHUNK = 3 * 512 * 1024; // 1.5 MB, a multiple of 3 so base64 chunks have no padding
+
+/** Append the bytes of `src` to the end of `dest`, in chunks to keep memory low. */
+export async function appendFile(src: string, dest: string): Promise<void> {
+  const size = await fileSize(src);
+  const destInfo = await FileSystem.getInfoAsync(dest);
+  let first = !destInfo.exists;
+  for (let pos = 0; pos < size; pos += APPEND_CHUNK) {
+    const chunk = await FileSystem.readAsStringAsync(src, {
+      encoding: FileSystem.EncodingType.Base64,
+      position: pos,
+      length: Math.min(APPEND_CHUNK, size - pos),
+    });
+    await FileSystem.writeAsStringAsync(dest, chunk, {
+      encoding: FileSystem.EncodingType.Base64,
+      append: !first,
+    });
+    first = false;
+  }
+}
+
+export function segmentUriFor(id: string): string {
+  return `${DOWNLOAD_DIR}${id}.segment`;
+}
+
 export { FileSystem };
+
+/** Files in the app's private download folder (partial downloads, segments). */
+export async function listWorkingFiles(): Promise<{ name: string; uri: string; size: number }[]> {
+  try {
+    await ensureDownloadDir();
+    const names = await FileSystem.readDirectoryAsync(DOWNLOAD_DIR);
+    return Promise.all(
+      names.map(async (name) => {
+        const uri = `${DOWNLOAD_DIR}${name}`;
+        return { name, uri, size: await fileSize(uri) };
+      }),
+    );
+  } catch {
+    return [];
+  }
+}

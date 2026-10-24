@@ -1,4 +1,6 @@
-import React from 'react';
+import React, { useCallback, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
+import { formatBytes } from '../utils/format';
 import { Alert, Linking, Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
@@ -15,7 +17,12 @@ export function SettingsScreen() {
   const { colors } = useTheme();
   const { settings, update } = useSettings();
   const history = useHistory();
-  const { clearFinished } = useDownloads();
+  const { clearFinished, storageStats, cleanWorkingFiles } = useDownloads();
+  const [stats, setStats] = useState<Awaited<ReturnType<typeof storageStats>>>();
+  const refreshStats = useCallback(() => {
+    storageStats().then(setStats).catch(() => {});
+  }, [storageStats]);
+  useFocusEffect(refreshStats);
 
   return (
     <Screen title="Settings">
@@ -68,6 +75,27 @@ export function SettingsScreen() {
           subtitle={`Movies/${ALBUM_NAME} — visible in Gallery and Files`}
         />
         <Divider />
+        <Row
+          icon="pie-chart-outline"
+          title="Storage used"
+          subtitle={
+            stats
+              ? `${stats.savedCount} saved videos · ${formatBytes(stats.savedBytes)}${stats.workingBytes ? ` · ${formatBytes(stats.workingBytes)} in partial downloads` : ''}`
+              : 'Calculating…'
+          }
+        />
+        <Divider />
+        <Row
+          icon="trash-bin-outline"
+          title="Clean up leftover partial files"
+          subtitle={stats?.orphanBytes ? `${formatBytes(stats.orphanBytes)} can be freed` : 'Nothing to clean'}
+          onPress={async () => {
+            const freed = await cleanWorkingFiles();
+            Alert.alert('Storage cleaned', freed ? `Freed ${formatBytes(freed)}.` : 'There were no leftover files.');
+            refreshStats();
+          }}
+        />
+        <Divider />
         <Row icon="checkmark-done-outline" title="Clear completed & cancelled" subtitle="Files stay on your device" onPress={clearFinished} />
       </Card>
 
@@ -108,9 +136,11 @@ export function SettingsScreen() {
           Video Downloader {Constants.expoConfig?.version ?? ''}
         </Text>
         <Text style={[typography.small, { color: colors.textMuted }]}>
-          This app only downloads videos when the source officially allows it: public Internet Archive items,
-          freely licensed Wikimedia Commons files, and direct file links you have rights to. YouTube, Vimeo and other
-          platforms are view-only and open in their official apps. No DRM or platform protections are bypassed.
+          Downloads direct video links (with redirects and resume), unencrypted HLS streams in your choice of
+          resolution, videos that web pages publish openly, public Internet Archive items and free-licensed Wikimedia
+          Commons files. YouTube, Facebook, Instagram, TikTok and similar platforms only serve video to their own
+          players, so they open in their official apps, with each platform's own save/export option explained. No DRM,
+          encryption or platform protection is bypassed.
         </Text>
       </Card>
     </Screen>

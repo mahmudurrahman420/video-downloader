@@ -42,9 +42,16 @@ test('direct files allowed, platform stream CDNs refused', () => {
   assert.equal(kindOf('https://rr3---sn-abc.googlevideo.com/videoplayback.mp4'), 'unsupported');
   assert.equal(kindOf('https://scontent.xx.fbcdn.net/v/clip.mp4'), 'unsupported');
   assert.equal(kindOf('https://www.instagram.com/reel/abc/'), 'unsupported');
-  assert.equal(kindOf('https://example.com/page.html'), 'unsupported');
   assert.equal(kindOf('https://example.com/song.mp3'), 'unsupported');
-  assert.equal(kindOf('https://example.com/live/master.m3u8'), 'unsupported');
+  assert.equal(kindOf('https://example.com/manifest.mpd'), 'unsupported');
+});
+
+test('HLS playlists and web pages are routed to their adapters', () => {
+  assert.equal(kindOf('https://example.com/live/master.m3u8'), 'hls:');
+  assert.equal(kindOf('https://example.com/v/index.m3u8?token=a'), 'hls:');
+  assert.equal(kindOf('https://example.com/page.html'), 'direct::check');
+  // Platform CDNs stay refused even when they look like HLS.
+  assert.equal(kindOf('https://manifest.googlevideo.com/api/hls_playlist/index.m3u8'), 'unsupported');
 });
 
 test('links without a video extension are checked with the server, not rejected', () => {

@@ -7,6 +7,8 @@ export type ProviderId =
   | 'internet-archive'
   | 'wikimedia-commons'
   | 'direct'
+  | 'hls'
+  | 'webpage'
   | 'unsupported';
 
 /**
@@ -22,6 +24,12 @@ export interface DownloadOption {
   sizeBytes?: number;
   /** Whether the server supports HTTP range requests (resumable). */
   acceptsRanges?: boolean;
+  /** 'hls' = url is an HLS media playlist whose segments are joined into one file. */
+  kind?: 'file' | 'hls';
+  /** sizeBytes is an estimate (e.g. bitrate × duration), not an exact size. */
+  sizeEstimated?: boolean;
+  /** Vertical resolution, used to sort/label quality choices. */
+  height?: number;
 }
 
 /** Official way for the video's owner to get a downloadable copy. */
@@ -103,6 +111,10 @@ export interface DownloadItem {
   savedLocation?: string;
   /** Completed file was deleted from the device outside the app. */
   fileMissing?: boolean;
+  /** Download type; missing = 'file' (items saved by older versions). */
+  kind?: 'file' | 'hls';
+  /** HLS progress, persisted so interrupted stream downloads resume per segment. */
+  hls?: { segmentsDone: number; segmentCount: number; bytesCommitted: number };
   createdAt: number;
   updatedAt: number;
   completedAt?: number;

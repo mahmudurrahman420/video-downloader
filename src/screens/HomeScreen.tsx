@@ -244,7 +244,7 @@ export function HomeScreen() {
 
             {state.meta.downloadAllowed && state.meta.options.length > 0 && (
               <View>
-                <SectionLabel>Download options</SectionLabel>
+                <SectionLabel>{state.meta.options.some((o) => o.height) ? 'Choose quality' : 'Download options'}</SectionLabel>
                 <Card style={{ padding: 0 }}>
                   {state.meta.options.map((o, idx) => {
                     const meta = state.meta;
@@ -262,7 +262,7 @@ export function HomeScreen() {
                             {o.label}
                           </Text>
                           <Text style={[typography.small, { color: colors.textMuted }]} numberOfLines={1}>
-                            {formatBytes(o.sizeBytes)} · {o.fileName}
+                            {o.sizeEstimated && o.sizeBytes ? '≈ ' : ''}{formatBytes(o.sizeBytes)} · {o.fileName}
                           </Text>
                         </View>
                         {queued ? (
