@@ -35,8 +35,15 @@ export async function resolveVimeo(sourceUrl: string, id: string): Promise<Video
       `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(pageUrl)}`,
     );
   } catch (e) {
-    if (e instanceof AppError && (e.status === 403 || e.status === 404)) {
-      throw new AppError('http', 'This Vimeo video is private or could not be found.', e.status);
+    if (e instanceof AppError && e.status === 403) {
+      throw new AppError(
+        'http',
+        'This Vimeo video is private or its owner restricts where it can be shown, so Vimeo won’t share its details with other apps. Open it on Vimeo instead.',
+        e.status,
+      );
+    }
+    if (e instanceof AppError && e.status === 404) {
+      throw new AppError('http', 'This Vimeo video could not be found. It may have been removed.', e.status);
     }
     throw e;
   }

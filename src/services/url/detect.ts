@@ -156,6 +156,11 @@ export function detectSource(input: string): Detection {
 
   // Internet Archive: archive.org/details/<identifier>
   if (hostMatches(u.host, 'archive.org')) {
+    // archive.org/download/<item>/<file.mp4> is a direct file link (it redirects to a storage node).
+    const fileLink = u.pathname.match(/^\/download\/[^/]+\/.+\.([a-z0-9]{2,4})$/i);
+    if (fileLink && VIDEO_EXTENSIONS.includes(fileLink[1].toLowerCase())) {
+      return { kind: 'supported', provider: 'direct', url: u };
+    }
     const m = u.pathname.match(/^\/(?:details|download|embed)\/([^/]+)/);
     if (!m) return { kind: 'unsupported', url: u, platformName: 'Internet Archive', reason: 'Open a specific item page (archive.org/details/…) and copy its link.' };
     return { kind: 'supported', provider: 'internet-archive', url: u, id: decodeURIComponent(m[1]) };
@@ -163,8 +168,14 @@ export function detectSource(input: string): Detection {
 
   // Wikimedia Commons file pages
   if (hostMatches(u.host, 'commons.wikimedia.org')) {
-    const fromPath = u.pathname.match(/^\/wiki\/(File:.+)$/i);
-    const title = fromPath ? decodeURIComponent(fromPath[1]) : u.query.title?.startsWith('File:') ? u.query.title : undefined;
+    let path = u.pathname;
+    try {
+      path = decodeURIComponent(path); // shared links often encode ":" as %3A
+    } catch {
+      /* keep raw */
+    }
+    const fromPath = path.match(/^\/wiki\/(File:.+)$/i);
+    const title = fromPath ? fromPath[1] : u.query.title?.startsWith('File:') ? u.query.title : undefined;
     if (!title) return { kind: 'unsupported', url: u, platformName: 'Wikimedia Commons', reason: 'Open a specific file page (commons.wikimedia.org/wiki/File:…) and copy its link.' };
     return { kind: 'supported', provider: 'wikimedia-commons', url: u, id: title.replace(/_/g, ' ') };
   }

@@ -6,7 +6,7 @@ import { isHlsText } from '../hls/playlist';
 import { resolveHls } from './hls';
 import { resolveWebPage } from './webpage';
 
-const HLS_TYPES = ['application/vnd.apple.mpegurl', 'application/x-mpegurl', 'audio/mpegurl', 'audio/x-mpegurl'];
+const HLS_TYPES = ['application/vnd.apple.mpegurl', 'application/x-mpegurl', 'audio/mpegurl', 'audio/x-mpegurl', 'vnd.apple.mpegurl'];
 
 /**
  * Direct links: the server's own response decides what the link is.

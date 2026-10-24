@@ -97,7 +97,8 @@ export async function fetchText(url: string, maxChars = 2_000_000, timeoutMs = 1
   );
   const contentType = (res.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
   let text = '';
-  if (res.ok && !contentType.startsWith('video/') && !contentType.startsWith('audio/') && !contentType.startsWith('image/')) {
+  const isPlaylistType = contentType.includes('mpegurl');
+  if (res.ok && (isPlaylistType || (!contentType.startsWith('video/') && !contentType.startsWith('audio/') && !contentType.startsWith('image/')))) {
     text = await res.text();
     if (text.length > maxChars) text = text.slice(0, maxChars);
   }

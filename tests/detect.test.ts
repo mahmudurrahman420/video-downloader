@@ -78,6 +78,12 @@ test('Google Drive and platform pages are refused with a reason', () => {
   assert.equal(kindOf('https://www.tiktok.com/@a/video/1'), 'unsupported');
 });
 
+test('encoded Commons links and archive.org file links are recognised', () => {
+  assert.equal(kindOf('https://commons.wikimedia.org/wiki/File%3ABig_Buck_Bunny_4K.webm'), 'wikimedia-commons:File:Big Buck Bunny 4K.webm');
+  assert.equal(kindOf('https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4'), 'direct:');
+  assert.equal(kindOf('https://archive.org/download/BigBuckBunny_124'), 'internet-archive:BigBuckBunny_124');
+});
+
 test('url parser normalises hosts and queries', () => {
   const u = parseUrl('https://WWW.Example.com:8080/a/b?x=1&y=hello%20there#frag')!;
   assert.equal(u.host, 'example.com');

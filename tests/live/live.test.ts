@@ -130,7 +130,18 @@ test('LIVE YouTube: real metadata, view-only with official link', T, async () =>
 });
 
 test('LIVE Vimeo: real metadata, view-only', T, async () => {
-  const m = await meta('https://vimeo.com/76979871');
-  assert.ok(m.title.length > 0);
-  assert.equal(m.downloadAllowed, false);
+  // Individual videos can become private/embed-restricted over time; any one public video proves the adapter.
+  const ids = ['76979871', '1084537', '22439234', '347119375'];
+  const errors: string[] = [];
+  for (const id of ids) {
+    try {
+      const m = await meta(`https://vimeo.com/${id}`);
+      assert.ok(m.title.length > 0);
+      assert.equal(m.downloadAllowed, false);
+      return;
+    } catch (e) {
+      errors.push(`${id}: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  assert.fail(`No Vimeo video resolved: ${errors.join(' / ')}`);
 });

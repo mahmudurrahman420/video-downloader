@@ -2,6 +2,7 @@
 import { createInterface } from 'node:readline';
 const rl = createInterface({ input: process.stdin });
 let current = null;
+const results = [];
 const flush = () => {
   if (!current) return;
   const msg = current.lines.join(' | ').replace(/\r?\n/g, ' ').slice(0, 900);
@@ -16,7 +17,10 @@ for await (const line of rl) {
     if (/^\s*(ok|not ok) \d+/.test(line) || /^# (tests|pass|fail)/.test(line)) { flush(); continue; }
     if (/error:|message|expected|actual|code:|cause/i.test(line)) current.lines.push(line.trim());
   }
-  const ok = line.match(/^ok \d+ - (LIVE.*)$/);
-  if (ok) console.log(`::notice title=PASSED::${ok[1]}`);
+  const ok = line.match(/^\s*ok \d+ - (LIVE.*)$/);
+  if (ok) { results.push(`PASS ${ok[1]}`); console.log(`::notice title=PASSED::${ok[1]}`); }
+  const bad = line.match(/^\s*not ok \d+ - (LIVE.*)$/);
+  if (bad) results.push(`FAIL ${bad[1]}`);
 }
 flush();
+console.log(`::notice title=LIVE SUMMARY::${results.join(' ; ') || 'no results parsed'}`);
