@@ -43,7 +43,10 @@ jobs:
           npm test
 
       - name: Live provider integration tests (real network)
-        run: npm run test:live
+        shell: bash
+        run: |
+          set -o pipefail
+          npx tsx --test --test-concurrency=1 --test-reporter=tap tests/live/*.test.ts 2>&1 | node scripts/annotate-tap.mjs
 
       - name: Generate Android project
         run: npx expo prebuild --platform android --no-install
